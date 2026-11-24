@@ -1,0 +1,17 @@
+{
+  "name": "universebyte-inquiry-management-portal",
+  "version": "1.0.0",
+  "description": "UNIVERSEBYTE – INQUIRY MANAGEMENT PORTAL. Technology Redefined.",
+  "scripts": {
+    "server:dev": "npm run dev --prefix server",
+    "client:dev": "npm run dev --prefix client",
+    "dev": "concurrently \"npm run dev --prefix server\" \"npm run dev --prefix client\"",
+    "build:client": "npm run build --prefix client",
+    "build": "npm run build --prefix client",
+    "start": "npm run start --prefix server",
+    "seed": "npm run seed --prefix server"
+  },
+  "devDependencies": {
+    "concurrently": "^9.2.5"
+  }
+}
