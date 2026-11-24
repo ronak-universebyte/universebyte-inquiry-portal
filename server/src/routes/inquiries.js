@@ -783,6 +783,11 @@ router.post('/:id/remarks', authenticate, async (req, res) => {
 // DELETE /api/inquiries/:id (Admin only)
 router.delete('/:id', authenticate, requireAdmin, async (req, res) => {
   try {
+    // Explicit RBAC enforcement: Only administrators can delete inquiries
+    if (!req.user || req.user.role !== 'admin') {
+      return res.status(403).json({ error: 'Access denied. Only administrators are permitted to delete inquiries.' });
+    }
+
     const inquiryId = req.params.id;
     let inquiry = null;
 
@@ -797,6 +802,7 @@ router.delete('/:id', authenticate, requireAdmin, async (req, res) => {
       return res.status(404).json({ error: 'Inquiry not found.' });
     }
 
+    // Clean up related followups and activities before deleting inquiry
     await Followup.deleteMany({ inquiry_id: inquiry._id });
     await InquiryActivity.deleteMany({ inquiry_id: inquiry._id });
     await Inquiry.deleteOne({ _id: inquiry._id });

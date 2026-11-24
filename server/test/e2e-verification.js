@@ -313,6 +313,53 @@ async function runTestSuite() {
     assert.strictEqual(loginRes.status, 200);
   });
 
+  // 16. Unauthenticated delete request returns 401 Unauthorized
+  await test('16. Unauthenticated delete request returns 401 Unauthorized', async () => {
+    const res = await request(`/inquiries/${testInquiryId}`, {
+      method: 'DELETE',
+    });
+    assert.strictEqual(res.status, 401, 'Unauthenticated delete must return 401');
+    assert.ok(res.data.error, 'Must include error message');
+  });
+
+  // 17. Invalid or expired token delete request returns 401 Unauthorized
+  await test('17. Invalid or expired JWT token on delete request returns 401 Unauthorized', async () => {
+    const res = await request(`/inquiries/${testInquiryId}`, {
+      method: 'DELETE',
+      headers: { Authorization: 'Bearer invalid.or.expired.jwt.token' }
+    });
+    assert.strictEqual(res.status, 401, 'Invalid JWT token must return 401');
+    assert.ok(res.data.error, 'Must include error message');
+  });
+
+  // 18. Non-admin staff attempting to delete inquiry returns 403 Forbidden
+  await test('18. Non-admin staff attempting to delete inquiry returns 403 Forbidden', async () => {
+    const res = await request(`/inquiries/${testInquiryId}`, {
+      method: 'DELETE',
+      headers: { Authorization: `Bearer ${staffToken}` }
+    });
+    assert.strictEqual(res.status, 403, 'Non-admin staff must be denied with 403');
+    assert.ok(res.data.error.toLowerCase().includes('admin'), 'Must state administrator requirement');
+  });
+
+  // 19. Admin can delete inquiry successfully (200 OK)
+  await test('19. Admin can delete inquiry successfully with clean database removal', async () => {
+    const res = await request(`/inquiries/${testInquiryId}`, {
+      method: 'DELETE',
+      headers: { Authorization: `Bearer ${adminToken}` }
+    });
+    assert.strictEqual(res.status, 200, 'Admin delete must succeed with 200 OK');
+    assert.ok(res.data.message.includes('deleted successfully'));
+  });
+
+  // 20. Deleted inquiry is verified removed from database
+  await test('20. Deleted inquiry is completely removed and returns 404 Not Found', async () => {
+    const res = await request(`/inquiries/${testInquiryId}`, {
+      headers: { Authorization: `Bearer ${adminToken}` }
+    });
+    assert.strictEqual(res.status, 404, 'Deleted inquiry should return 404 Not Found');
+  });
+
   console.log(`\n====================================================`);
   console.log(` RESULTS: ${passed}/${total} test cases passed successfully.`);
   console.log(`====================================================`);

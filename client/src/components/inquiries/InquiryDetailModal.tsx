@@ -16,9 +16,12 @@ import {
   CheckCircle2,
   AlertCircle,
   FileText,
-  Activity
+  Activity,
+  Trash2,
+  AlertTriangle
 } from 'lucide-react';
 import api from '../../services/api';
+import { useAuth } from '../../context/AuthContext';
 import { WhatsAppModal } from './WhatsAppModal';
 import { CallModal } from './CallModal';
 import { StatusChangeModal } from './StatusChangeModal';
@@ -44,6 +47,9 @@ export const InquiryDetailModal: React.FC<InquiryDetailModalProps> = ({
   staffList,
   onDataChanged
 }) => {
+  const { user } = useAuth();
+  const isAdmin = user?.role === 'admin';
+
   const [inquiry, setInquiry] = useState<any>(null);
   const [activities, setActivities] = useState<any[]>([]);
   const [followups, setFollowups] = useState<any[]>([]);
@@ -55,6 +61,26 @@ export const InquiryDetailModal: React.FC<InquiryDetailModalProps> = ({
   const [showStatus, setShowStatus] = useState(false);
   const [showFollowup, setShowFollowup] = useState(false);
   const [showEdit, setShowEdit] = useState(false);
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [isDeleting, setIsDeleting] = useState(false);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
+
+  const handleDelete = async () => {
+    if (!inquiry || !isAdmin) return;
+    setIsDeleting(true);
+    setDeleteError(null);
+    try {
+      await api.delete(`/inquiries/${inquiry.id}`);
+      setShowDeleteConfirm(false);
+      onClose();
+      onDataChanged();
+    } catch (err: any) {
+      console.error('Failed to delete inquiry:', err);
+      setDeleteError(err.response?.data?.error || 'Failed to delete inquiry.');
+    } finally {
+      setIsDeleting(false);
+    }
+  };
 
   // Add remark inline state
   const [newRemark, setNewRemark] = useState('');
@@ -174,14 +200,32 @@ export const InquiryDetailModal: React.FC<InquiryDetailModalProps> = ({
                 </button>
               </div>
 
-              <button
-                type="button"
-                onClick={() => setShowEdit(true)}
-                className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-semibold text-[#7138F5] hover:bg-purple-50 dark:hover:bg-purple-950/40 rounded-xl transition-colors"
-              >
-                <Edit3 className="w-3.5 h-3.5" />
-                <span>Edit Info</span>
-              </button>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => setShowEdit(true)}
+                  className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-semibold text-[#7138F5] hover:bg-purple-50 dark:hover:bg-purple-950/40 rounded-xl transition-colors"
+                >
+                  <Edit3 className="w-3.5 h-3.5" />
+                  <span>Edit Info</span>
+                </button>
+
+                {/* Delete Inquiry (Admin Only) */}
+                {isAdmin && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setDeleteError(null);
+                      setShowDeleteConfirm(true);
+                    }}
+                    title="Delete Inquiry (Admin Only)"
+                    className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-semibold text-red-600 hover:bg-red-50 dark:hover:bg-red-950/40 rounded-xl transition-colors"
+                  >
+                    <Trash2 className="w-3.5 h-3.5" />
+                    <span>Delete</span>
+                  </button>
+                )}
+              </div>
             </div>
 
             {/* Profile & Information Grid */}
@@ -423,6 +467,61 @@ export const InquiryDetailModal: React.FC<InquiryDetailModalProps> = ({
               onDataChanged();
             }}
           />
+
+          {/* Delete Confirmation Modal (Admin Only) */}
+          {isAdmin && showDeleteConfirm && inquiry && (
+            <Modal
+              isOpen={showDeleteConfirm}
+              onClose={() => {
+                if (!isDeleting) setShowDeleteConfirm(false);
+              }}
+              title="Delete Inquiry"
+              subtitle="Admin action required"
+            >
+              <div className="space-y-4">
+                <div className="p-4 bg-red-50 dark:bg-red-950/30 border border-red-200 dark:border-red-900/50 rounded-2xl flex items-start gap-3">
+                  <AlertTriangle className="w-5 h-5 text-red-600 shrink-0 mt-0.5" />
+                  <div className="text-xs text-red-800 dark:text-red-200">
+                    <p className="font-bold text-sm mb-1 text-red-900 dark:text-red-100">
+                      Delete inquiry permanently?
+                    </p>
+                    <p>
+                      You are about to permanently delete inquiry{' '}
+                      <strong className="font-mono text-red-950 dark:text-red-50">{inquiry.inquiry_id}</strong> for student{' '}
+                      <strong className="font-semibold">{inquiry.student_name}</strong>.
+                    </p>
+                    <p className="mt-2 text-red-700 dark:text-red-300">
+                      All associated student data, follow-up records, and history entries will be removed from MongoDB.
+                    </p>
+                  </div>
+                </div>
+
+                {deleteError && (
+                  <p className="text-xs text-red-600 font-semibold">{deleteError}</p>
+                )}
+
+                <div className="flex items-center justify-end gap-3 pt-3 border-t border-slate-100 dark:border-slate-800">
+                  <button
+                    type="button"
+                    disabled={isDeleting}
+                    onClick={() => setShowDeleteConfirm(false)}
+                    className="px-4 py-2 text-xs font-semibold text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-xl"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="button"
+                    disabled={isDeleting}
+                    onClick={handleDelete}
+                    className="flex items-center gap-1.5 px-4 py-2 bg-red-600 hover:bg-red-700 text-white font-bold text-xs rounded-xl shadow-md transition-all disabled:opacity-50"
+                  >
+                    <Trash2 className="w-3.5 h-3.5" />
+                    <span>{isDeleting ? 'Deleting...' : 'Confirm Delete'}</span>
+                  </button>
+                </div>
+              </div>
+            </Modal>
+          )}
         </>
       )}
     </>

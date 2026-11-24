@@ -16,10 +16,13 @@ import {
   RefreshCw,
   X,
   RotateCcw,
-  Sparkles
+  Sparkles,
+  Trash2,
+  AlertTriangle
 } from 'lucide-react';
 import api from '../../services/api';
 import { StatusBadge, PriorityBadge } from '../common/Badge';
+import { Modal } from '../common/Modal';
 import { useAuth } from '../../context/AuthContext';
 
 interface AllInquiriesViewProps {
@@ -86,6 +89,27 @@ export const AllInquiriesView: React.FC<AllInquiriesViewProps> = ({
   const [bulkAssignStaff, setBulkAssignStaff] = useState('');
   const [bulkStatus, setBulkStatus] = useState('');
   const [isBulkExecuting, setIsBulkExecuting] = useState(false);
+
+  // Delete action (Admin only)
+  const [inquiryToDelete, setInquiryToDelete] = useState<any | null>(null);
+  const [isDeleting, setIsDeleting] = useState(false);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
+
+  const handleDeleteInquiry = async () => {
+    if (!inquiryToDelete || !isAdmin) return;
+    setIsDeleting(true);
+    setDeleteError(null);
+    try {
+      await api.delete(`/inquiries/${inquiryToDelete.id}`);
+      setInquiryToDelete(null);
+      fetchInquiries();
+    } catch (err: any) {
+      console.error('Failed to delete inquiry:', err);
+      setDeleteError(err.response?.data?.error || 'Failed to delete inquiry.');
+    } finally {
+      setIsDeleting(false);
+    }
+  };
 
   const fetchInquiries = async () => {
     setIsLoading(true);
@@ -718,6 +742,21 @@ export const AllInquiriesView: React.FC<AllInquiriesViewProps> = ({
                           >
                             <Edit3 className="w-3.5 h-3.5" />
                           </button>
+
+                          {/* Delete inquiry (Admin only) */}
+                          {isAdmin && (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setDeleteError(null);
+                                setInquiryToDelete(inq);
+                              }}
+                              title="Delete Inquiry (Admin Only)"
+                              className="p-1.5 rounded-lg text-slate-400 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-950/40 transition-colors"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
+                          )}
                         </div>
                       </td>
                     </tr>
@@ -755,6 +794,63 @@ export const AllInquiriesView: React.FC<AllInquiriesViewProps> = ({
           </div>
         </div>
       </div>
+
+      {/* Delete Confirmation Modal (Admin Only) */}
+      {isAdmin && inquiryToDelete && (
+        <Modal
+          isOpen={!!inquiryToDelete}
+          onClose={() => {
+            if (!isDeleting) setInquiryToDelete(null);
+          }}
+          title="Confirm Inquiry Deletion"
+          subtitle="Permanent database action"
+        >
+          <div className="space-y-4">
+            <div className="p-4 bg-red-50 dark:bg-red-950/30 border border-red-200 dark:border-red-900/50 rounded-2xl flex items-start gap-3">
+              <AlertTriangle className="w-5 h-5 text-red-600 shrink-0 mt-0.5" />
+              <div className="text-xs text-red-800 dark:text-red-200">
+                <p className="font-bold text-sm mb-1 text-red-900 dark:text-red-100">
+                  Permanently delete inquiry?
+                </p>
+                <p>
+                  Are you sure you want to delete inquiry{' '}
+                  <strong className="font-mono text-red-950 dark:text-red-50">
+                    {inquiryToDelete.inquiry_id}
+                  </strong>{' '}
+                  for student <strong className="font-semibold">{inquiryToDelete.student_name}</strong>?
+                </p>
+                <p className="mt-2 text-red-700 dark:text-red-300">
+                  This will permanently remove the student inquiry, follow-ups, and activity history from MongoDB. This action cannot be undone.
+                </p>
+              </div>
+            </div>
+
+            {deleteError && (
+              <p className="text-xs text-red-600 font-semibold">{deleteError}</p>
+            )}
+
+            <div className="flex items-center justify-end gap-3 pt-3 border-t border-slate-100 dark:border-slate-800">
+              <button
+                type="button"
+                disabled={isDeleting}
+                onClick={() => setInquiryToDelete(null)}
+                className="px-4 py-2 text-xs font-semibold text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-xl"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                disabled={isDeleting}
+                onClick={handleDeleteInquiry}
+                className="flex items-center gap-1.5 px-4 py-2 bg-red-600 hover:bg-red-700 text-white font-bold text-xs rounded-xl shadow-md transition-all disabled:opacity-50"
+              >
+                <Trash2 className="w-3.5 h-3.5" />
+                <span>{isDeleting ? 'Deleting...' : 'Delete Permanently'}</span>
+              </button>
+            </div>
+          </div>
+        </Modal>
+      )}
     </div>
   );
 };
