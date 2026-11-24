@@ -1,15 +1,14 @@
-import db from '../db.js';
+import Inquiry from '../models/Inquiry.js';
 
-export function generateInquiryId() {
+export async function generateInquiryId() {
   const year = new Date().getFullYear();
   const prefix = `UB-INQ-${year}-`;
 
   // Find latest inquiry ID with this prefix
-  const lastInquiry = db.prepare(`
-    SELECT inquiry_id FROM inquiries 
-    WHERE inquiry_id LIKE ? 
-    ORDER BY id DESC LIMIT 1
-  `).get(`${prefix}%`);
+  const regex = new RegExp(`^${prefix}\\d+`);
+  const lastInquiry = await Inquiry.findOne({ inquiry_id: regex })
+    .sort({ inquiry_id: -1, _id: -1 })
+    .select('inquiry_id');
 
   let nextNum = 1;
   if (lastInquiry && lastInquiry.inquiry_id) {

@@ -5,7 +5,7 @@ import path from 'path';
 import fs from 'fs';
 import { fileURLToPath } from 'url';
 import { config } from './config.js';
-import { initDatabase } from './db.js';
+import { connectDB, disconnectDB } from './db.js';
 import { seedDatabase } from './seed.js';
 
 // Route imports
@@ -22,16 +22,14 @@ const __dirname = path.dirname(__filename);
 
 const app = express();
 
-// Initialize database schema and ensure seed data is present
-initDatabase();
-seedDatabase().catch(err => console.error('Database seeding check notice:', err.message));
-
 // Middlewares
-app.use(cors({
-  origin: '*',
-  methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization']
-}));
+app.use(
+  cors({
+    origin: '*',
+    methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+    allowedHeaders: ['Content-Type', 'Authorization'],
+  })
+);
 
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
@@ -58,7 +56,8 @@ app.get('/api/health', (req, res) => {
     status: 'online',
     portal: 'UNIVERSEBYTE – INQUIRY MANAGEMENT PORTAL',
     tagline: 'Technology Redefined.',
-    timestamp: new Date().toISOString()
+    database: 'MongoDB Atlas',
+    timestamp: new Date().toISOString(),
   });
 });
 
@@ -78,15 +77,46 @@ if (fs.existsSync(clientDistPath)) {
 app.use((err, req, res, next) => {
   console.error('Unhandled Server Error:', err);
   res.status(err.status || 500).json({
-    error: err.message || 'Internal Server Error'
+    error: err.message || 'Internal Server Error',
   });
 });
 
 const PORT = config.port;
-app.listen(PORT, () => {
-  console.log(`=======================================================`);
-  console.log(` UNIVERSEBYTE – INQUIRY MANAGEMENT PORTAL BACKEND`);
-  console.log(` Technology Redefined.`);
-  console.log(` Server running on http://localhost:${PORT}`);
-  console.log(`=======================================================`);
-});
+
+// Start server only after database is connected
+async function startServer() {
+  try {
+    await connectDB();
+    await seedDatabase().catch((err) =>
+      console.error('Database seeding check notice:', err.message)
+    );
+
+    const server = app.listen(PORT, () => {
+      console.log(`=======================================================`);
+      console.log(` UNIVERSEBYTE – INQUIRY MANAGEMENT PORTAL BACKEND`);
+      console.log(` Technology Redefined.`);
+      console.log(` Database: MongoDB Atlas (Mongoose)`);
+      console.log(` Server running on http://localhost:${PORT}`);
+      console.log(`=======================================================`);
+    });
+
+    const gracefulShutdown = async (signal) => {
+      console.log(`\nReceived ${signal}. Shutting down gracefully...`);
+      server.close(async () => {
+        await disconnectDB();
+        console.log('HTTP server closed.');
+        process.exit(0);
+      });
+    };
+
+    process.on('SIGINT', () => gracefulShutdown('SIGINT'));
+    process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
+  } catch (error) {
+    console.error('Failed to start server due to database connection error:', error.message);
+    process.exit(1);
+  }
+}
+
+startServer();
+
+export default app;

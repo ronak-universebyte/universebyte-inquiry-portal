@@ -1,8 +1,8 @@
 import jwt from 'jsonwebtoken';
 import { config } from '../config.js';
-import db from '../db.js';
+import User from '../models/User.js';
 
-export function authenticate(req, res, next) {
+export async function authenticate(req, res, next) {
   const authHeader = req.headers.authorization;
   if (!authHeader || !authHeader.startsWith('Bearer ')) {
     return res.status(401).json({ error: 'Authentication required. No token provided.' });
@@ -12,13 +12,13 @@ export function authenticate(req, res, next) {
 
   try {
     const decoded = jwt.verify(token, config.jwtSecret);
-    const user = db.prepare('SELECT id, name, email, role, phone, is_active FROM users WHERE id = ?').get(decoded.id);
+    const user = await User.findById(decoded.id).select('name email role phone is_active');
 
     if (!user) {
       return res.status(401).json({ error: 'User account no longer exists.' });
     }
 
-    if (!user.is_active) {
+    if (user.is_active !== 1) {
       return res.status(403).json({ error: 'Your account has been deactivated. Please contact the administrator.' });
     }
 

@@ -1,33 +1,43 @@
 import bcrypt from 'bcryptjs';
-import db, { initDatabase } from './db.js';
+import { connectDB, disconnectDB } from './db.js';
+import {
+  User,
+  Course,
+  InquirySource,
+  Inquiry,
+  Followup,
+  InquiryActivity,
+  Setting,
+} from './models/index.js';
 
 export async function seedDatabase() {
-  initDatabase();
+  await connectDB();
 
-  console.log('Seeding initial system data...');
+  console.log('Checking and seeding system initial data...');
+
+  const now = new Date().toISOString().replace('T', ' ').slice(0, 19);
 
   // 1. Settings
-  const settingsInsert = db.prepare(`
-    INSERT OR REPLACE INTO settings (key, value, description, updated_at) 
-    VALUES (?, ?, ?, datetime('now', 'localtime'))
-  `);
-
   const initialSettings = [
-    ['company_name', 'UniverseByte', 'Company brand name'],
-    ['company_tagline', 'Technology Redefined.', 'Company official tagline'],
-    ['company_location', 'Ahmedabad, Gujarat, India', 'Company headquarters location'],
-    ['company_website', 'https://www.universebyte.in', 'Official website URL'],
-    ['company_whatsapp', '+91 78598 20822', 'Primary WhatsApp contact number'],
-    ['company_phone', '+91 78598 20822', 'Primary phone number'],
-    ['company_email', 'info@universebyte.in', 'Official contact email'],
-    ['company_logo', '/universebyte-logo.png', 'Logo path or URL'],
-    ['allow_duplicate_mobile', 'warn', 'Policy on duplicate phone numbers (warn / block)'],
-    ['default_inquiry_status', 'New', 'Default status for incoming inquiries'],
-    ['currency_symbol', '₹', 'Currency symbol used']
+    { key: 'company_name', value: 'UniverseByte', description: 'Company brand name' },
+    { key: 'company_tagline', value: 'Technology Redefined.', description: 'Company official tagline' },
+    { key: 'company_location', value: 'Ahmedabad, Gujarat, India', description: 'Company headquarters location' },
+    { key: 'company_website', value: 'https://www.universebyte.in', description: 'Official website URL' },
+    { key: 'company_whatsapp', value: '+91 78598 20822', description: 'Primary WhatsApp contact number' },
+    { key: 'company_phone', value: '+91 78598 20822', description: 'Primary phone number' },
+    { key: 'company_email', value: 'info@universebyte.in', description: 'Official contact email' },
+    { key: 'company_logo', value: '/universebyte-logo.png', description: 'Logo path or URL' },
+    { key: 'allow_duplicate_mobile', value: 'warn', description: 'Policy on duplicate phone numbers (warn / block)' },
+    { key: 'default_inquiry_status', value: 'New', description: 'Default status for incoming inquiries' },
+    { key: 'currency_symbol', value: '₹', description: 'Currency symbol used' },
   ];
 
-  for (const [key, val, desc] of initialSettings) {
-    settingsInsert.run(key, val, desc);
+  for (const item of initialSettings) {
+    await Setting.findOneAndUpdate(
+      { key: item.key },
+      { $setOnInsert: { value: item.value, description: item.description, updated_at: now } },
+      { upsert: true }
+    );
   }
 
   // 2. Courses
@@ -39,16 +49,22 @@ export async function seedDatabase() {
     'Web Development',
     'PHP & Laravel',
     'Data Science',
-    'Other'
+    'Other',
   ];
 
-  const courseInsert = db.prepare(`
-    INSERT OR IGNORE INTO courses (name, description, is_active, created_at, updated_at)
-    VALUES (?, ?, 1, datetime('now', 'localtime'), datetime('now', 'localtime'))
-  `);
-
-  for (const course of defaultCourses) {
-    courseInsert.run(course, `Comprehensive training program in ${course} with industry-aligned syllabus.`);
+  for (const courseName of defaultCourses) {
+    await Course.findOneAndUpdate(
+      { name: courseName },
+      {
+        $setOnInsert: {
+          description: `Comprehensive training program in ${courseName} with industry-aligned syllabus.`,
+          is_active: 1,
+          created_at: now,
+          updated_at: now,
+        },
+      },
+      { upsert: true }
+    );
   }
 
   // 3. Inquiry Sources
@@ -61,42 +77,80 @@ export async function seedDatabase() {
     'Walk-in',
     'Reference',
     'Justdial',
-    'Other'
+    'Other',
   ];
 
-  const sourceInsert = db.prepare(`
-    INSERT OR IGNORE INTO inquiry_sources (name, is_active, created_at, updated_at)
-    VALUES (?, 1, datetime('now', 'localtime'), datetime('now', 'localtime'))
-  `);
-
   for (const src of defaultSources) {
-    sourceInsert.run(src);
+    await InquirySource.findOneAndUpdate(
+      { name: src },
+      {
+        $setOnInsert: {
+          is_active: 1,
+          created_at: now,
+          updated_at: now,
+        },
+      },
+      { upsert: true }
+    );
   }
 
-  // 4. Users (Admin and Staff)
-  const userInsert = db.prepare(`
-    INSERT OR IGNORE INTO users (name, email, password, role, phone, is_active, created_at, updated_at)
-    VALUES (?, ?, ?, ?, ?, 1, datetime('now', 'localtime'), datetime('now', 'localtime'))
-  `);
+  // 4. Default Users (Admin and Staff)
+  const adminPasswordHash = await bcrypt.hash('Admin@123', 10);
+  const staffPasswordHash = await bcrypt.hash('Staff@123', 10);
 
-  const adminPasswordHash = bcrypt.hashSync('Admin@123', 10);
-  const staffPasswordHash = bcrypt.hashSync('Staff@123', 10);
+  const defaultUsers = [
+    {
+      name: 'Admin UniverseByte',
+      email: 'admin@universebyte.in',
+      password: adminPasswordHash,
+      role: 'admin',
+      phone: '+91 78598 20822',
+    },
+    {
+      name: 'Rahul Sharma',
+      email: 'rahul@universebyte.in',
+      password: staffPasswordHash,
+      role: 'staff',
+      phone: '+91 98765 43210',
+    },
+    {
+      name: 'Priya Patel',
+      email: 'priya@universebyte.in',
+      password: staffPasswordHash,
+      role: 'staff',
+      phone: '+91 98250 12345',
+    },
+    {
+      name: 'Amit Trivedi',
+      email: 'amit@universebyte.in',
+      password: staffPasswordHash,
+      role: 'staff',
+      phone: '+91 94280 67890',
+    },
+  ];
 
-  userInsert.run('Admin UniverseByte', 'admin@universebyte.in', adminPasswordHash, 'admin', '+91 78598 20822');
-  userInsert.run('Rahul Sharma', 'rahul@universebyte.in', staffPasswordHash, 'staff', '+91 98765 43210');
-  userInsert.run('Priya Patel', 'priya@universebyte.in', staffPasswordHash, 'staff', '+91 98250 12345');
-  userInsert.run('Amit Trivedi', 'amit@universebyte.in', staffPasswordHash, 'staff', '+91 94280 67890');
+  for (const u of defaultUsers) {
+    const existing = await User.findOne({ email: u.email });
+    if (!existing) {
+      await User.create({
+        ...u,
+        is_active: 1,
+        created_at: now,
+        updated_at: now,
+      });
+    }
+  }
 
   // Check if inquiries already exist
-  const existingInquiriesCount = db.prepare('SELECT COUNT(*) as count FROM inquiries').get().count;
+  const existingInquiriesCount = await Inquiry.countDocuments();
 
   if (existingInquiriesCount === 0) {
-    console.log('Seeding sample inquiry records...');
+    console.log('Seeding sample inquiry records and follow-ups...');
 
-    const adminUser = db.prepare("SELECT * FROM users WHERE email = 'admin@universebyte.in'").get();
-    const rahulUser = db.prepare("SELECT * FROM users WHERE email = 'rahul@universebyte.in'").get();
-    const priyaUser = db.prepare("SELECT * FROM users WHERE email = 'priya@universebyte.in'").get();
-    const amitUser = db.prepare("SELECT * FROM users WHERE email = 'amit@universebyte.in'").get();
+    const adminUser = await User.findOne({ email: 'admin@universebyte.in' });
+    const rahulUser = await User.findOne({ email: 'rahul@universebyte.in' });
+    const priyaUser = await User.findOne({ email: 'priya@universebyte.in' });
+    const amitUser = await User.findOne({ email: 'amit@universebyte.in' });
 
     const sampleInquiries = [
       {
@@ -113,13 +167,14 @@ export async function seedDatabase() {
         source_name: 'Website',
         inquiry_date: '2026-11-20 10:15:00',
         preferred_contact_time: 'Evening (5 PM - 8 PM)',
-        assigned_to: rahulUser.id,
-        assigned_to_name: rahulUser.name,
+        assigned_to: rahulUser?._id,
+        assigned_to_name: rahulUser?.name,
         status: 'Interested',
         priority: 'High',
-        next_followup_date: '2026-11-24 16:30:00', // Today
+        next_followup_date: '2026-11-24 16:30:00',
         last_contact_date: '2026-11-22 14:00:00',
-        remarks: 'Very eager to learn Generative AI and LLM architectures. Requested syllabus PDF.'
+        remarks: 'Very eager to learn Generative AI and LLM architectures. Requested syllabus PDF.',
+        created_by: adminUser?._id,
       },
       {
         inquiry_id: 'UB-INQ-2026-0002',
@@ -135,16 +190,16 @@ export async function seedDatabase() {
         source_name: 'Instagram',
         inquiry_date: '2026-11-21 11:30:00',
         preferred_contact_time: 'Afternoon (1 PM - 4 PM)',
-        assigned_to: priyaUser.id,
-        assigned_to_name: priyaUser.name,
+        assigned_to: priyaUser?._id,
+        assigned_to_name: priyaUser?.name,
         status: 'Demo Scheduled',
         priority: 'High',
-        next_followup_date: '2026-11-25 11:00:00', // Upcoming
+        next_followup_date: '2026-11-25 11:00:00',
         last_contact_date: '2026-11-23 15:30:00',
-        remarks: 'Scheduled demo lecture for React + Node fullstack module on Wednesday 11 AM.'
+        remarks: 'Scheduled demo lecture for React + Node fullstack module on Wednesday 11 AM.',
+        created_by: adminUser?._id,
       },
       {
-        id_suffix: '0003',
         inquiry_id: 'UB-INQ-2026-0003',
         student_name: 'Karan Shah',
         mobile: '9909223344',
@@ -158,13 +213,14 @@ export async function seedDatabase() {
         source_name: 'Google Ads',
         inquiry_date: '2026-11-18 16:45:00',
         preferred_contact_time: 'Morning (10 AM - 12 PM)',
-        assigned_to: rahulUser.id,
-        assigned_to_name: rahulUser.name,
+        assigned_to: rahulUser?._id,
+        assigned_to_name: rahulUser?.name,
         status: 'Converted',
         priority: 'High',
         next_followup_date: null,
         last_contact_date: '2026-11-22 17:00:00',
-        remarks: 'Enrolled in Weekend Python Data Mastery batch! Registration fee received.'
+        remarks: 'Enrolled in Weekend Python Data Mastery batch! Registration fee received.',
+        created_by: adminUser?._id,
       },
       {
         inquiry_id: 'UB-INQ-2026-0004',
@@ -180,13 +236,14 @@ export async function seedDatabase() {
         source_name: 'WhatsApp',
         inquiry_date: '2026-11-17 14:20:00',
         preferred_contact_time: 'Any Time',
-        assigned_to: amitUser.id,
-        assigned_to_name: amitUser.name,
+        assigned_to: amitUser?._id,
+        assigned_to_name: amitUser?.name,
         status: 'Follow-up Required',
         priority: 'Medium',
-        next_followup_date: '2026-11-23 10:00:00', // Overdue
+        next_followup_date: '2026-11-23 10:00:00',
         last_contact_date: '2026-11-20 16:00:00',
-        remarks: 'Wanted to discuss with parents regarding offline vs hybrid schedule.'
+        remarks: 'Wanted to discuss with parents regarding offline vs hybrid schedule.',
+        created_by: adminUser?._id,
       },
       {
         inquiry_id: 'UB-INQ-2026-0005',
@@ -202,13 +259,14 @@ export async function seedDatabase() {
         source_name: 'Walk-in',
         inquiry_date: '2026-11-24 11:00:00',
         preferred_contact_time: 'Morning (10 AM - 12 PM)',
-        assigned_to: priyaUser.id,
-        assigned_to_name: priyaUser.name,
+        assigned_to: priyaUser?._id,
+        assigned_to_name: priyaUser?.name,
         status: 'New',
         priority: 'Medium',
-        next_followup_date: '2026-11-24 17:00:00', // Today
+        next_followup_date: '2026-11-24 17:00:00',
         last_contact_date: null,
-        remarks: 'Walked in at reception. Inquired about career transition from non-tech to Data Science.'
+        remarks: 'Walked in at reception. Inquired about career transition from non-tech to Data Science.',
+        created_by: adminUser?._id,
       },
       {
         inquiry_id: 'UB-INQ-2026-0006',
@@ -224,13 +282,14 @@ export async function seedDatabase() {
         source_name: 'Facebook Ads',
         inquiry_date: '2026-11-15 09:30:00',
         preferred_contact_time: 'Evening (5 PM - 8 PM)',
-        assigned_to: rahulUser.id,
-        assigned_to_name: rahulUser.name,
+        assigned_to: rahulUser?._id,
+        assigned_to_name: rahulUser?.name,
         status: 'Not Interested',
         priority: 'Low',
         next_followup_date: null,
         last_contact_date: '2026-11-19 12:00:00',
-        remarks: 'Looking exclusively for 100% free courses. Advised regarding scholarships, but declined.'
+        remarks: 'Looking exclusively for 100% free courses. Advised regarding scholarships, but declined.',
+        created_by: adminUser?._id,
       },
       {
         inquiry_id: 'UB-INQ-2026-0007',
@@ -246,13 +305,14 @@ export async function seedDatabase() {
         source_name: 'Reference',
         inquiry_date: '2026-11-23 15:10:00',
         preferred_contact_time: 'Afternoon (1 PM - 4 PM)',
-        assigned_to: amitUser.id,
-        assigned_to_name: amitUser.name,
+        assigned_to: amitUser?._id,
+        assigned_to_name: amitUser?.name,
         status: 'Contacted',
         priority: 'High',
-        next_followup_date: '2026-11-26 14:00:00', // Upcoming
+        next_followup_date: '2026-11-26 14:00:00',
         last_contact_date: '2026-11-24 12:15:00',
-        remarks: 'Referred by alumni Parth Solanki. Explained frontend curriculum and project portfolio.'
+        remarks: 'Referred by alumni Parth Solanki. Explained frontend curriculum and project portfolio.',
+        created_by: adminUser?._id,
       },
       {
         inquiry_id: 'UB-INQ-2026-0008',
@@ -268,13 +328,14 @@ export async function seedDatabase() {
         source_name: 'Justdial',
         inquiry_date: '2026-11-14 13:00:00',
         preferred_contact_time: 'Any Time',
-        assigned_to: rahulUser.id,
-        assigned_to_name: rahulUser.name,
+        assigned_to: rahulUser?._id,
+        assigned_to_name: rahulUser?.name,
         status: 'Invalid Number',
         priority: 'Low',
         next_followup_date: null,
         last_contact_date: '2026-11-14 14:00:00',
-        remarks: 'Dialer responded "The number you have dialed does not exist". Marked as invalid lead.'
+        remarks: 'Dialer responded "The number you have dialed does not exist". Marked as invalid lead.',
+        created_by: adminUser?._id,
       },
       {
         inquiry_id: 'UB-INQ-2026-0009',
@@ -290,13 +351,14 @@ export async function seedDatabase() {
         source_name: 'Google Ads',
         inquiry_date: '2026-11-19 18:20:00',
         preferred_contact_time: 'Evening (5 PM - 8 PM)',
-        assigned_to: priyaUser.id,
-        assigned_to_name: priyaUser.name,
+        assigned_to: priyaUser?._id,
+        assigned_to_name: priyaUser?.name,
         status: 'Interested',
         priority: 'High',
-        next_followup_date: '2026-11-24 18:00:00', // Today
+        next_followup_date: '2026-11-24 18:00:00',
         last_contact_date: '2026-11-22 16:40:00',
-        remarks: 'Has basic Python knowledge. Wants to build AI agent solutions for industrial automation.'
+        remarks: 'Has basic Python knowledge. Wants to build AI agent solutions for industrial automation.',
+        created_by: adminUser?._id,
       },
       {
         inquiry_id: 'UB-INQ-2026-0010',
@@ -312,112 +374,110 @@ export async function seedDatabase() {
         source_name: 'Website',
         inquiry_date: '2026-11-16 11:00:00',
         preferred_contact_time: 'Morning (10 AM - 12 PM)',
-        assigned_to: rahulUser.id,
-        assigned_to_name: rahulUser.name,
+        assigned_to: rahulUser?._id,
+        assigned_to_name: rahulUser?.name,
         status: 'Converted',
         priority: 'High',
         next_followup_date: null,
         last_contact_date: '2026-11-21 15:00:00',
-        remarks: 'Joined November 2026 Full Stack batch. First installment cleared.'
-      }
+        remarks: 'Joined November 2026 Full Stack batch. First installment cleared.',
+        created_by: adminUser?._id,
+      },
     ];
 
-    const inqInsert = db.prepare(`
-      INSERT INTO inquiries (
-        inquiry_id, student_name, mobile, alt_mobile, email,
-        qualification, college, current_status, city,
-        course_name, source_name, inquiry_date, preferred_contact_time,
-        assigned_to, assigned_to_name, status, priority,
-        next_followup_date, last_contact_date, remarks,
-        created_by, created_at, updated_at
-      ) VALUES (
-        ?, ?, ?, ?, ?,
-        ?, ?, ?, ?,
-        ?, ?, ?, ?,
-        ?, ?, ?, ?,
-        ?, ?, ?,
-        ?, ?, ?
-      )
-    `);
+    for (const inqData of sampleInquiries) {
+      const createdInq = await Inquiry.create({
+        ...inqData,
+        created_at: inqData.inquiry_date,
+        updated_at: inqData.inquiry_date,
+      });
 
-    const actInsert = db.prepare(`
-      INSERT INTO inquiry_activities (
-        inquiry_id, user_id, user_name, activity_type,
-        description, previous_value, new_value, created_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-    `);
+      // 1. Creation Activity
+      await InquiryActivity.create({
+        inquiry_id: createdInq._id,
+        user_id: adminUser?._id,
+        user_name: adminUser?.name || 'Admin',
+        activity_type: 'CREATED',
+        description: `Inquiry received via ${createdInq.source_name} for course ${createdInq.course_name}`,
+        previous_value: null,
+        new_value: createdInq.status,
+        created_at: createdInq.inquiry_date,
+      });
 
-    const fupInsert = db.prepare(`
-      INSERT INTO followups (
-        inquiry_id, scheduled_date, scheduled_time, assigned_to,
-        status, outcome, remarks, completed_at, completed_by, created_at, updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `);
-
-    for (const inq of sampleInquiries) {
-      const res = inqInsert.run(
-        inq.inquiry_id, inq.student_name, inq.mobile, inq.alt_mobile, inq.email,
-        inq.qualification, inq.college, inq.current_status, inq.city,
-        inq.course_name, inq.source_name, inq.inquiry_date, inq.preferred_contact_time,
-        inq.assigned_to, inq.assigned_to_name, inq.status, inq.priority,
-        inq.next_followup_date, inq.last_contact_date, inq.remarks,
-        adminUser.id, inq.inquiry_date, inq.inquiry_date
-      );
-
-      const dbInqId = res.lastInsertRowid;
-
-      // Add Creation activity
-      actInsert.run(
-        dbInqId, adminUser.id, adminUser.name, 'CREATED',
-        `Inquiry received via ${inq.source_name} for course ${inq.course_name}`,
-        null, inq.status, inq.inquiry_date
-      );
-
-      // Add Assignment activity
-      if (inq.assigned_to) {
-        actInsert.run(
-          dbInqId, adminUser.id, adminUser.name, 'ASSIGNED',
-          `Inquiry assigned to ${inq.assigned_to_name}`,
-          null, inq.assigned_to_name, inq.inquiry_date
-        );
+      // 2. Assignment Activity
+      if (createdInq.assigned_to) {
+        await InquiryActivity.create({
+          inquiry_id: createdInq._id,
+          user_id: adminUser?._id,
+          user_name: adminUser?.name || 'Admin',
+          activity_type: 'ASSIGNED',
+          description: `Inquiry assigned to ${createdInq.assigned_to_name}`,
+          previous_value: null,
+          new_value: createdInq.assigned_to_name,
+          created_at: createdInq.inquiry_date,
+        });
       }
 
-      // Add follow-up if present
-      if (inq.next_followup_date) {
-        const parts = inq.next_followup_date.split(' ');
+      // 3. Follow-up if present
+      if (createdInq.next_followup_date) {
+        const parts = createdInq.next_followup_date.split(' ');
         const dateStr = parts[0];
         const timeStr = parts[1] ? parts[1].substring(0, 5) : '15:00';
-        
-        let fupStatus = 'Pending';
-        if (dateStr < '2026-11-24') {
-          fupStatus = 'Pending'; // Overdue
-        }
 
-        fupInsert.run(
-          dbInqId, dateStr, timeStr, inq.assigned_to,
-          fupStatus, null, inq.remarks, null, null, inq.inquiry_date, inq.inquiry_date
-        );
+        await Followup.create({
+          inquiry_id: createdInq._id,
+          scheduled_date: dateStr,
+          scheduled_time: timeStr,
+          assigned_to: createdInq.assigned_to,
+          status: 'Pending',
+          outcome: null,
+          remarks: createdInq.remarks,
+          completed_at: null,
+          completed_by: null,
+          created_at: createdInq.inquiry_date,
+          updated_at: createdInq.inquiry_date,
+        });
 
-        actInsert.run(
-          dbInqId, inq.assigned_to, inq.assigned_to_name, 'FOLLOWUP_SCHEDULED',
-          `Follow-up scheduled for ${dateStr} at ${timeStr}`,
-          null, `${dateStr} ${timeStr}`, inq.inquiry_date
-        );
+        await InquiryActivity.create({
+          inquiry_id: createdInq._id,
+          user_id: createdInq.assigned_to,
+          user_name: createdInq.assigned_to_name,
+          activity_type: 'FOLLOWUP_SCHEDULED',
+          description: `Follow-up scheduled for ${dateStr} at ${timeStr}`,
+          previous_value: null,
+          new_value: `${dateStr} ${timeStr}`,
+          created_at: createdInq.inquiry_date,
+        });
       }
 
-      // Add completed follow-up for converted inquiries
-      if (inq.status === 'Converted') {
-        fupInsert.run(
-          dbInqId, inq.last_contact_date.split(' ')[0], '14:30', inq.assigned_to,
-          'Completed', 'Enrolled & Paid', 'Student completed registration formalities.',
-          inq.last_contact_date, inq.assigned_to, inq.inquiry_date, inq.last_contact_date
-        );
+      // 4. Completed follow-up for Converted inquiries
+      if (createdInq.status === 'Converted') {
+        const contactDate = createdInq.last_contact_date ? createdInq.last_contact_date.split(' ')[0] : '2026-11-21';
 
-        actInsert.run(
-          dbInqId, inq.assigned_to, inq.assigned_to_name, 'STATUS_CHANGE',
-          `Status changed from Interested to Converted`,
-          'Interested', 'Converted', inq.last_contact_date
-        );
+        await Followup.create({
+          inquiry_id: createdInq._id,
+          scheduled_date: contactDate,
+          scheduled_time: '14:30',
+          assigned_to: createdInq.assigned_to,
+          status: 'Completed',
+          outcome: 'Enrolled & Paid',
+          remarks: 'Student completed registration formalities.',
+          completed_at: createdInq.last_contact_date || createdInq.inquiry_date,
+          completed_by: createdInq.assigned_to,
+          created_at: createdInq.inquiry_date,
+          updated_at: createdInq.last_contact_date || createdInq.inquiry_date,
+        });
+
+        await InquiryActivity.create({
+          inquiry_id: createdInq._id,
+          user_id: createdInq.assigned_to,
+          user_name: createdInq.assigned_to_name,
+          activity_type: 'STATUS_CHANGE',
+          description: 'Status changed from Interested to Converted',
+          previous_value: 'Interested',
+          new_value: 'Converted',
+          created_at: createdInq.last_contact_date || createdInq.inquiry_date,
+        });
       }
     }
 
@@ -429,8 +489,14 @@ export async function seedDatabase() {
 
 // Run directly if invoked from command line
 if (process.argv[1] && process.argv[1].endsWith('seed.js')) {
-  seedDatabase().catch(err => {
-    console.error('Seeding failed:', err);
-    process.exit(1);
-  });
+  seedDatabase()
+    .then(async () => {
+      console.log('Seeding script finished successfully.');
+      await disconnectDB();
+      process.exit(0);
+    })
+    .catch((err) => {
+      console.error('Seeding failed:', err);
+      process.exit(1);
+    });
 }

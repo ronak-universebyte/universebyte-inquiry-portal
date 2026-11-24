@@ -1,187 +1,226 @@
 import express from 'express';
-import db from '../db.js';
+import mongoose from 'mongoose';
 import { authenticate, requireAdmin } from '../middleware/auth.js';
+import Setting from '../models/Setting.js';
+import Course from '../models/Course.js';
+import InquirySource from '../models/InquirySource.js';
 
 const router = express.Router();
 
 // GET /api/settings - Read settings
-router.get('/', authenticate, (req, res) => {
-  const settingsRows = db.prepare('SELECT key, value, description FROM settings').all();
-  const settings = {};
-  for (const row of settingsRows) {
-    settings[row.key] = row.value;
-  }
-
-  // Also send course and source counts for settings overview
-  const totalCourses = db.prepare('SELECT COUNT(*) as count FROM courses').get().count;
-  const activeCourses = db.prepare('SELECT COUNT(*) as count FROM courses WHERE is_active = 1').get().count;
-  const totalSources = db.prepare('SELECT COUNT(*) as count FROM inquiry_sources').get().count;
-  const activeSources = db.prepare('SELECT COUNT(*) as count FROM inquiry_sources WHERE is_active = 1').get().count;
-
-  res.json({
-    settings,
-    summary: {
-      totalCourses,
-      activeCourses,
-      totalSources,
-      activeSources
+router.get('/', authenticate, async (req, res) => {
+  try {
+    const settingsDocs = await Setting.find({});
+    const settings = {};
+    for (const doc of settingsDocs) {
+      settings[doc.key] = doc.value;
     }
-  });
+
+    const totalCourses = await Course.countDocuments({});
+    const activeCourses = await Course.countDocuments({ is_active: 1 });
+    const totalSources = await InquirySource.countDocuments({});
+    const activeSources = await InquirySource.countDocuments({ is_active: 1 });
+
+    res.json({
+      settings,
+      summary: {
+        totalCourses,
+        activeCourses,
+        totalSources,
+        activeSources,
+      },
+    });
+  } catch (err) {
+    console.error('Get settings error:', err);
+    res.status(500).json({ error: 'Failed to retrieve settings.' });
+  }
 });
 
 // PUT /api/settings - Update general settings (Admin only)
-router.put('/', authenticate, requireAdmin, (req, res) => {
-  const allowedKeys = [
-    'company_name',
-    'company_tagline',
-    'company_location',
-    'company_website',
-    'company_whatsapp',
-    'company_phone',
-    'company_email',
-    'company_logo',
-    'allow_duplicate_mobile'
-  ];
+router.put('/', authenticate, requireAdmin, async (req, res) => {
+  try {
+    const allowedKeys = [
+      'company_name',
+      'company_tagline',
+      'company_location',
+      'company_website',
+      'company_whatsapp',
+      'company_phone',
+      'company_email',
+      'company_logo',
+      'allow_duplicate_mobile',
+      'default_inquiry_status',
+      'currency_symbol',
+    ];
 
-  const updateStmt = db.prepare(`
-    INSERT OR REPLACE INTO settings (key, value, updated_at) 
-    VALUES (?, ?, datetime('now', 'localtime'))
-  `);
+    const now = new Date().toISOString().replace('T', ' ').slice(0, 19);
 
-  db.transaction(() => {
+    const ops = [];
     for (const [key, val] of Object.entries(req.body)) {
       if (allowedKeys.includes(key) && typeof val === 'string') {
-        updateStmt.run(key, val.trim());
+        ops.push(
+          Setting.findOneAndUpdate(
+            { key },
+            { $set: { value: val.trim(), updated_at: now } },
+            { upsert: true, new: true }
+          )
+        );
       }
     }
-  })();
 
-  res.json({ message: 'Settings updated successfully.' });
+    await Promise.all(ops);
+    res.json({ message: 'Settings updated successfully.' });
+  } catch (err) {
+    console.error('Update settings error:', err);
+    res.status(500).json({ error: 'Failed to update settings.' });
+  }
 });
 
 // GET /api/settings/courses - List courses
-router.get('/courses', authenticate, (req, res) => {
-  const { includeInactive } = req.query;
-  const query = includeInactive === 'true' 
-    ? 'SELECT * FROM courses ORDER BY is_active DESC, name ASC'
-    : 'SELECT * FROM courses WHERE is_active = 1 ORDER BY name ASC';
-  
-  const courses = db.prepare(query).all();
-  res.json({ courses });
+router.get('/courses', authenticate, async (req, res) => {
+  try {
+    const { includeInactive } = req.query;
+    const filter = includeInactive === 'true' ? {} : { is_active: 1 };
+    const courses = await Course.find(filter).sort({ is_active: -1, name: 1 });
+    res.json({ courses });
+  } catch (err) {
+    console.error('Get courses error:', err);
+    res.status(500).json({ error: 'Failed to retrieve courses.' });
+  }
 });
 
 // POST /api/settings/courses - Add course (Admin only)
-router.post('/courses', authenticate, requireAdmin, (req, res) => {
-  const { name, description } = req.body;
-  if (!name || !name.trim()) {
-    return res.status(400).json({ error: 'Course name is required.' });
+router.post('/courses', authenticate, requireAdmin, async (req, res) => {
+  try {
+    const { name, description } = req.body;
+    if (!name || !name.trim()) {
+      return res.status(400).json({ error: 'Course name is required.' });
+    }
+
+    const regex = new RegExp(`^${name.trim()}$`, 'i');
+    const existing = await Course.findOne({ name: regex });
+    if (existing) {
+      return res.status(409).json({ error: 'Course already exists with this name.' });
+    }
+
+    const now = new Date().toISOString().replace('T', ' ').slice(0, 19);
+    const newCourse = await Course.create({
+      name: name.trim(),
+      description: description ? description.trim() : '',
+      is_active: 1,
+      created_at: now,
+      updated_at: now,
+    });
+
+    res.status(201).json({ message: 'Course added successfully.', course: newCourse });
+  } catch (err) {
+    console.error('Add course error:', err);
+    res.status(500).json({ error: 'Failed to add course.' });
   }
-
-  const existing = db.prepare('SELECT id FROM courses WHERE LOWER(name) = LOWER(?)').get(name.trim());
-  if (existing) {
-    return res.status(409).json({ error: 'Course already exists with this name.' });
-  }
-
-  const now = new Date().toISOString().replace('T', ' ').slice(0, 19);
-  const result = db.prepare(`
-    INSERT INTO courses (name, description, is_active, created_at, updated_at)
-    VALUES (?, ?, 1, ?, ?)
-  `).run(name.trim(), description ? description.trim() : null, now, now);
-
-  const newCourse = db.prepare('SELECT * FROM courses WHERE id = ?').get(result.lastInsertRowid);
-  res.status(201).json({ message: 'Course added successfully.', course: newCourse });
 });
 
 // PUT /api/settings/courses/:id - Edit / Toggle course (Admin only)
-router.put('/courses/:id', authenticate, requireAdmin, (req, res) => {
-  const course = db.prepare('SELECT * FROM courses WHERE id = ?').get(req.params.id);
-  if (!course) {
-    return res.status(404).json({ error: 'Course not found.' });
+router.put('/courses/:id', authenticate, requireAdmin, async (req, res) => {
+  try {
+    const courseId = req.params.id;
+    let course = null;
+
+    if (mongoose.Types.ObjectId.isValid(courseId)) {
+      course = await Course.findById(courseId);
+    }
+
+    if (!course) {
+      return res.status(404).json({ error: 'Course not found.' });
+    }
+
+    const { name, description, is_active } = req.body;
+    const now = new Date().toISOString().replace('T', ' ').slice(0, 19);
+
+    if (name) course.name = name.trim();
+    if (description !== undefined) course.description = description ? description.trim() : '';
+    if (is_active !== undefined) course.is_active = is_active ? 1 : 0;
+    course.updated_at = now;
+
+    await course.save();
+    res.json({ message: 'Course updated successfully.', course });
+  } catch (err) {
+    console.error('Update course error:', err);
+    res.status(500).json({ error: 'Failed to update course.' });
   }
-
-  const { name, description, is_active } = req.body;
-  const now = new Date().toISOString().replace('T', ' ').slice(0, 19);
-
-  db.prepare(`
-    UPDATE courses SET 
-      name = COALESCE(?, name),
-      description = COALESCE(?, description),
-      is_active = COALESCE(?, is_active),
-      updated_at = ?
-    WHERE id = ?
-  `).run(
-    name ? name.trim() : null,
-    description !== undefined ? description : null,
-    is_active !== undefined ? (is_active ? 1 : 0) : null,
-    now,
-    course.id
-  );
-
-  const updatedCourse = db.prepare('SELECT * FROM courses WHERE id = ?').get(course.id);
-  res.json({ message: 'Course updated successfully.', course: updatedCourse });
 });
 
 // GET /api/settings/sources - List sources
-router.get('/sources', authenticate, (req, res) => {
-  const { includeInactive } = req.query;
-  const query = includeInactive === 'true'
-    ? 'SELECT * FROM inquiry_sources ORDER BY is_active DESC, name ASC'
-    : 'SELECT * FROM inquiry_sources WHERE is_active = 1 ORDER BY name ASC';
-
-  const sources = db.prepare(query).all();
-  res.json({ sources });
+router.get('/sources', authenticate, async (req, res) => {
+  try {
+    const { includeInactive } = req.query;
+    const filter = includeInactive === 'true' ? {} : { is_active: 1 };
+    const sources = await InquirySource.find(filter).sort({ is_active: -1, name: 1 });
+    res.json({ sources });
+  } catch (err) {
+    console.error('Get sources error:', err);
+    res.status(500).json({ error: 'Failed to retrieve sources.' });
+  }
 });
 
 // POST /api/settings/sources - Add source (Admin only)
-router.post('/sources', authenticate, requireAdmin, (req, res) => {
-  const { name } = req.body;
-  if (!name || !name.trim()) {
-    return res.status(400).json({ error: 'Source name is required.' });
+router.post('/sources', authenticate, requireAdmin, async (req, res) => {
+  try {
+    const { name } = req.body;
+    if (!name || !name.trim()) {
+      return res.status(400).json({ error: 'Source name is required.' });
+    }
+
+    const regex = new RegExp(`^${name.trim()}$`, 'i');
+    const existing = await InquirySource.findOne({ name: regex });
+    if (existing) {
+      return res.status(409).json({ error: 'Source already exists with this name.' });
+    }
+
+    const now = new Date().toISOString().replace('T', ' ').slice(0, 19);
+    const newSource = await InquirySource.create({
+      name: name.trim(),
+      is_active: 1,
+      created_at: now,
+      updated_at: now,
+    });
+
+    res.status(201).json({ message: 'Source added successfully.', source: newSource });
+  } catch (err) {
+    console.error('Add source error:', err);
+    res.status(500).json({ error: 'Failed to add source.' });
   }
-
-  const existing = db.prepare('SELECT id FROM inquiry_sources WHERE LOWER(name) = LOWER(?)').get(name.trim());
-  if (existing) {
-    return res.status(409).json({ error: 'Source already exists with this name.' });
-  }
-
-  const now = new Date().toISOString().replace('T', ' ').slice(0, 19);
-  const result = db.prepare(`
-    INSERT INTO inquiry_sources (name, is_active, created_at, updated_at)
-    VALUES (?, 1, ?, ?)
-  `).run(name.trim(), now, now);
-
-  const newSource = db.prepare('SELECT * FROM inquiry_sources WHERE id = ?').get(result.lastInsertRowid);
-  res.status(201).json({ message: 'Source added successfully.', source: newSource });
 });
 
 // PUT /api/settings/sources/:id - Edit / Toggle source (Admin only)
-router.put('/sources/:id', authenticate, requireAdmin, (req, res) => {
-  const source = db.prepare('SELECT * FROM inquiry_sources WHERE id = ?').get(req.params.id);
-  if (!source) {
-    return res.status(404).json({ error: 'Source not found.' });
+router.put('/sources/:id', authenticate, requireAdmin, async (req, res) => {
+  try {
+    const sourceId = req.params.id;
+    let source = null;
+
+    if (mongoose.Types.ObjectId.isValid(sourceId)) {
+      source = await InquirySource.findById(sourceId);
+    }
+
+    if (!source) {
+      return res.status(404).json({ error: 'Source not found.' });
+    }
+
+    const { name, is_active } = req.body;
+    const now = new Date().toISOString().replace('T', ' ').slice(0, 19);
+
+    if (name) source.name = name.trim();
+    if (is_active !== undefined) source.is_active = is_active ? 1 : 0;
+    source.updated_at = now;
+
+    await source.save();
+    res.json({ message: 'Source updated successfully.', source });
+  } catch (err) {
+    console.error('Update source error:', err);
+    res.status(500).json({ error: 'Failed to update source.' });
   }
-
-  const { name, is_active } = req.body;
-  const now = new Date().toISOString().replace('T', ' ').slice(0, 19);
-
-  db.prepare(`
-    UPDATE inquiry_sources SET 
-      name = COALESCE(?, name),
-      is_active = COALESCE(?, is_active),
-      updated_at = ?
-    WHERE id = ?
-  `).run(
-    name ? name.trim() : null,
-    is_active !== undefined ? (is_active ? 1 : 0) : null,
-    now,
-    source.id
-  );
-
-  const updatedSource = db.prepare('SELECT * FROM inquiry_sources WHERE id = ?').get(source.id);
-  res.json({ message: 'Source updated successfully.', source: updatedSource });
 });
 
-// GET /api/settings/statuses - List inquiry statuses and their descriptions
+// GET /api/settings/statuses - List inquiry statuses
 router.get('/statuses', authenticate, (req, res) => {
   const statuses = [
     { name: 'New', description: 'Fresh inquiry received, awaiting initial contact.', badgeColor: 'bg-blue-100 text-blue-800' },
@@ -191,7 +230,7 @@ router.get('/statuses', authenticate, (req, res) => {
     { name: 'Demo Scheduled', description: 'Demo lecture or batch trial session scheduled.', badgeColor: 'bg-indigo-100 text-indigo-800' },
     { name: 'Converted', description: 'Student enrolled and registered successfully.', badgeColor: 'bg-green-100 text-green-800' },
     { name: 'Not Interested', description: 'Student declined enrollment or opted for other plans.', badgeColor: 'bg-rose-100 text-rose-800' },
-    { name: 'Invalid Number', description: 'Wrong number, unreachable or spam inquiry.', badgeColor: 'bg-gray-100 text-gray-800' }
+    { name: 'Invalid Number', description: 'Wrong number, unreachable or spam inquiry.', badgeColor: 'bg-gray-100 text-gray-800' },
   ];
 
   res.json({ statuses });
